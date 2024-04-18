@@ -6,7 +6,7 @@
 ulimit -c unlimited
 
 # export ckpt_path="L12-old.pt"
-export ckpt_path="logs/lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.50-strategylego-lossfncos/checkpoint_best.pt"
+export ckpt_path="uniform_noise/lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.50-strategylego-lossfncos/checkpoint_best.pt"
 # example for HOMO (task_idx=2) & LUMO (task_idx=3)
 
 task=$1

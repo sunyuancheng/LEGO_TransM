@@ -70,3 +70,10 @@ bash finetune_molnet.sh $task_name
 task_idx=0   # task idx ranges from 0 to 11
 bash finetune_qm9_lego_noisynode.sh $task_idx
 ```
+
+
+## Evaluation on MD17
+```shell
+task_idx=0   # task idx ranges from 0 to 7
+bash finetune_md17_noisynode.sh $task_idx
+```
