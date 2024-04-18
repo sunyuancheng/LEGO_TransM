@@ -543,6 +543,11 @@ def _torch_persistent_save(obj, f):
 def _upgrade_state_dict(state):
     """Helper for upgrading old model checkpoints."""
 
+    if len(state.keys()) == 1:
+        state["extra_state"] = None
+        state["optimizer_history"] = None
+        return state
+        
     # add optimizer_history
     if "optimizer_history" not in state:
         state["optimizer_history"] = [

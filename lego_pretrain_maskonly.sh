@@ -1,6 +1,7 @@
+bash /client-tools/repair_V100.sh
 ulimit -c unlimited
 export data_path='./datasets/pcq-pos'               # path to data
-export save_path='./finetune_pretrained/'                          # path to logs
+export save_path='./uniform_noise/'                          # path to logs
 
 export lr=2e-4                                      # peak learning rate
 export warmup_steps=150000                          # warmup steps
@@ -16,22 +17,11 @@ export attn_dropout=0.1
 export weight_decay=0.0
 export droppath_prob=0.1                            # probability of stochastic depth
 export noise_scale=0.2                              # noise scale
-export mode_prob="0.2,0.2,0.6"                      # mode distribution for {2D+3D, 2D, 3D}
+export mode_prob="1.0,0.0,0.0"                      # mode distribution for {2D+3D, 2D, 3D}
 export dataset_name="PCQM4M-LSC-V2-3D"
 export add_3d="true"
 export num_3d_bias_kernel=128                       # number of Gaussian Basis kernels
 
-directories=(
-    "-lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.30-strategylego-lossfncos"
-    "-lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.25-strategylego-lossfncos"
-    "-lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.50-strategylego-lossfncos"
-    "-lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.15-strategylego-lossfncos"
-    "-lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.20-strategylego-lossfncos"
-    "-lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.10-strategylego-lossfncos"
-)
-index=$1
-selected_directory=${directories[$index]}
-export pretrained_model_path="--pretrained-model-path logs/${selected_directory}/checkpoint_best.pt"
 
 [ -z "${lr}" ] && lr=2e-4
 [ -z "${end_lr}" ] && end_lr=1e-9
@@ -56,7 +46,7 @@ export pretrained_model_path="--pretrained-model-path logs/${selected_directory}
 [ -z "${noise_scale}" ] && noise_scale=0.2
 [ -z "${mode_prob}" ] && mode_prob="0.2,0.2,0.6"
 
-[ -z "${dataset_name}" ] && dataset_name="PCQM4M-LSC-V2-3D"
+[ -z "${dataset_name}" ] && dataset_name="PCQM4M-LSC-DFT"
 [ -z "${add_3d}" ] && add_3d="true"
 [ -z "${no_2d}" ] && no_2d="false"
 [ -z "${num_3d_bias_kernel}" ] && num_3d_bias_kernel=128
@@ -64,7 +54,7 @@ export pretrained_model_path="--pretrained-model-path logs/${selected_directory}
 [ -z "${MASTER_PORT}" ] && MASTER_PORT=10086
 [ -z "${OMPI_COMM_WORLD_SIZE}" ] && OMPI_COMM_WORLD_SIZE=1
 
-[ -z "$save_prefix" ] && save_prefix=''
+[ -z "$save_prefix" ] && save_prefix="fix_edge"
 
 echo -e "\n\n"
 echo "==================================MP==========================================="
@@ -90,7 +80,12 @@ fi
 echo "ddp_options: ${ddp_options}"
 echo "==============================================================================="
 
-hyperparams=lr-$lr-end_lr-$end_lr-tsteps-$total_steps-wsteps-$warmup_steps-L$layers-D$hidden_size-F$ffn_size-H$num_head-SLN-$sandwich_ln-BS$((batch_size*n_gpu*OMPI_COMM_WORLD_SIZE*update_freq))-SEED$seed-CLIP$clip_norm-dp$dropout-attn_dp$attn_dropout-wd$weight_decay-dpp$droppath_prob-noisescale-$noise_scale-mode_prob-${mode_prob}-pretrained-directory-${index}
+lego_noise_scale=1.0
+LS_perturb_ratio=$1
+LS_perturb_strategy=lego_maskonly
+lego_loss_fn=cos
+
+hyperparams=lr-$lr-end_lr-$end_lr-tsteps-$total_steps-wsteps-$warmup_steps-L$layers-D$hidden_size-F$ffn_size-H$num_head-SLN-$sandwich_ln-BS$((batch_size*n_gpu*OMPI_COMM_WORLD_SIZE*update_freq))-SEED$seed-CLIP$clip_norm-dp$dropout-attn_dp$attn_dropout-wd$weight_decay-dpp$droppath_prob-noise$lego_noise_scale-mr$LS_perturb_ratio-strategy$LS_perturb_strategy-lossfn$lego_loss_fn
 save_dir=$save_path/$save_prefix-$hyperparams
 tsb_dir=$save_dir/tsb
 mkdir -p $save_dir
@@ -131,6 +126,7 @@ echo '\n\nhostname'
 hostname
 # echo '\n\nnvidia-smi'
 # nvidia-smi
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.device_count())"
 # echo '\n\nls -alh'
 # ls -alh
 # echo -e '\n\nls ~ -alh'
@@ -165,6 +161,7 @@ else
 fi
 echo "no_2d_args: ${no_2d_args}"
 
+
 echo "========================================================================================"
 
 export NCCL_ASYNC_ERROR_HADNLING=1
@@ -176,11 +173,13 @@ python -m torch.distributed.launch --nproc_per_node=$n_gpu --master_port=$MASTER
 	--num-workers 16 --ddp-backend=legacy_ddp \
 	--dataset-name $dataset_name \
 	--batch-size $batch_size --data-buffer-size 20 \
-	--task graph_prediction --criterion graph_prediction --arch transformer_m_base --num-classes 1 \
+	--task lego_pretrain --criterion lego_loss --arch lego_base --num-classes 1 \
 	--lr $lr --end-learning-rate $end_lr --lr-scheduler polynomial_decay --power 1 \
 	--warmup-updates $warmup_steps --total-num-update $total_steps --max-update $total_steps --update-freq $update_freq \
 	--encoder-layers $layers --encoder-attention-heads $num_head $add_3d_args $no_2d_args --num-3d-bias-kernel $num_3d_bias_kernel \
 	--encoder-embed-dim $hidden_size --encoder-ffn-embed-dim $ffn_size --droppath-prob $droppath_prob \
 	--attention-dropout $attn_dropout --act-dropout $act_dropout --dropout $dropout --weight-decay $weight_decay \
 	--optimizer adam --adam-betas '(0.9, 0.999)' --adam-eps 1e-8 $action_args --clip-norm $clip_norm \
-	--tensorboard-logdir $tsb_dir --save-dir $save_dir $pretrained_model_path --fp16 --noise-scale $noise_scale --mode-prob $mode_prob
+	--tensorboard-logdir $tsb_dir --save-dir $save_dir --fp16 --noise-scale $noise_scale --mode-prob $mode_prob \
+	--lego-noise-scale $lego_noise_scale --LS-perturb-ratio $LS_perturb_ratio --LS-perturb-strategy $LS_perturb_strategy \
+	--lego-loss-fn $lego_loss_fn --save-interval 2

@@ -55,6 +55,7 @@ dependencies:
   - zipp=3.6.0
   - zlib=1.2.11
   - pip:
+    - --extra-index-url https://pypi.douban.com/simple
     - absl-py==1.0.0
     - aiohttp==3.8.1
     - aiosignal==1.2.0

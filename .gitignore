@@ -135,3 +135,8 @@ experimental/*
 
 # Weights and Biases logs
 wandb/
+
+dataset/
+finetune_pretrained/
+uniform_noise/
+*.pt

@@ -348,6 +348,129 @@ class PygPCQM4Mv2PosDataset(InMemoryDataset):
         return split_dict
 
 
+
+class PygPCQM4Mv2DFTDataset(InMemoryDataset):
+    def __init__(self, root='dataset', smiles2graph=smiles2graph, transform=None, pre_transform=None):
+        '''
+            Pytorch Geometric PCQM4Mv2 dataset object
+                - root (str): the dataset folder will be located at root/pcqm4m_kddcup2021
+                - smiles2graph (callable): A callable function that converts a SMILES string into a graph object
+                    * The default smiles2graph requires rdkit to be installed
+        '''
+
+        self.original_root = root
+        self.smiles2graph = smiles2graph
+        self.folder = osp.join(root, 'pcqm4m-dft')
+        self.version = 1
+
+        # Old url hosted at Stanford
+        # md5sum: 65b742bafca5670be4497499db7d361b
+        # self.url = f'http://ogb-data.stanford.edu/data/lsc/pcqm4m-v2.zip'
+        # New url hosted by DGL team at AWS--much faster to download
+        self.url = 'https://dgl-data.s3-accelerate.amazonaws.com/dataset/OGB-LSC/pcqm4m-v2.zip'
+        self.pos_url = 'http://ogb-data.stanford.edu/data/lsc/pcqm4m-v2-train.sdf.tar.gz'
+
+        # check version and update if necessary
+        if osp.isdir(self.folder) and (not osp.exists(osp.join(self.folder, f'RELEASE_v{self.version}.txt'))):
+            print('PCQM4Mv2 dataset has been updated.')
+            if input('Will you update the dataset now? (y/N)\n').lower() == 'y':
+                shutil.rmtree(self.folder)
+
+        super(PygPCQM4Mv2DFTDataset, self).__init__(self.folder, transform, pre_transform)
+
+        self.data, self.slices = torch.load(self.processed_paths[0])
+
+    @property
+    def raw_file_names(self):
+        return 'data.csv.gz'
+
+    @property
+    def processed_file_names(self):
+        return 'geometric_data_processed.pt'
+
+    def download(self):
+        if decide_download(self.url):
+            path = download_url(self.url, self.original_root)
+            extract_zip(path, self.original_root)
+            os.unlink(path)
+        else:
+            print('Stop download.')
+            exit(-1)
+
+        if decide_download(self.pos_url):
+            path = download_url(self.pos_url, self.original_root)
+            tar = tarfile.open(path, 'r:gz')
+            filenames = tar.getnames()
+            for file in filenames:
+                tar.extract(file, self.original_root)
+            tar.close()
+            os.unlink(path)
+        else:
+            print('Stop download')
+            exit(-1)
+
+
+    def process(self):
+        data_df = pd.read_csv(osp.join(self.raw_dir, 'data.csv.gz'))
+        graph_pos_list = Chem.SDMolSupplier(osp.join(self.original_root, 'pcqm4m-v2-train.sdf'))
+        homolumogap_list = data_df['homolumogap']
+
+        data_list = []
+        print('Extracting 3D positions from SDF files for Training Data...')
+        with Pool(processes=120) as pool:
+            iter = pool.imap(mol2graph, graph_pos_list)
+
+            for i, graph in tqdm(enumerate(iter), total=len(graph_pos_list)):
+                try:
+                    data = Data()
+                    homolumogap = homolumogap_list[i]
+
+                    assert (len(graph['edge_feat']) == graph['edge_index'].shape[1])
+                    assert (len(graph['node_feat']) == graph['num_nodes'])
+
+                    data.__num_nodes__ = int(graph['num_nodes'])
+                    data.edge_index = torch.from_numpy(graph['edge_index']).to(torch.int64)
+                    data.edge_attr = torch.from_numpy(graph['edge_feat']).to(torch.int64)
+                    data.x = torch.from_numpy(graph['node_feat']).to(torch.int64)
+                    data.y = torch.Tensor([homolumogap])
+                    data.pos = torch.from_numpy(graph['position']).to(torch.float32)
+
+                    data_list.append(data)
+                except:
+                    continue
+        if self.pre_transform is not None:
+            data_list = [self.pre_transform(data) for data in data_list]
+
+        if self.pre_transform is not None:
+            data_list = [self.pre_transform(data) for data in data_list]
+
+        data, slices = self.collate(data_list)
+
+        torch.save((data, slices), self.processed_paths[0])
+        
+        data, slices = self.collate(data_list)
+
+        print('Saving...')
+        torch.save((data, slices), self.processed_paths[0])
+
+        import random
+        random.seed(0)
+        idx_split = {"train": [], "valid": []}        
+        total_len = list(range(len(data_list)))
+        random.shuffle(total_len)
+        valid_num = int(0.05 * len(data_list))
+        idx_split['valid'] = np.array(total_len[:valid_num])
+        idx_split['train'] = np.array(total_len[valid_num:])
+
+        print('Saving new split idx')
+        torch.save(idx_split, osp.join(self.root, f"split_dict_dft.pt"))
+
+    def get_idx_split(self):
+        split_dict = replace_numpy_with_torchtensor(torch.load(osp.join(self.root, 'split_dict_dft.pt')))
+        return split_dict
+
+
+
 @torch.jit.script
 def convert_to_single_emb(x, offset :int = 512):
     feature_num = x.size(1) if len(x.size()) > 1 else 1
@@ -358,6 +481,12 @@ def convert_to_single_emb(x, offset :int = 512):
 
 
 def preprocess_item(item):
+    if item.edge_attr == None:
+        N = item.x.size(0)
+        attn_bias = torch.zeros([N + 1, N + 1], dtype=torch.float)  # with graph token
+        item.attn_bias = attn_bias
+        return item
+    
     edge_attr, edge_index, x = item.edge_attr, item.edge_index.to(torch.int64), item.x
     N = x.size(0)
     x = convert_to_single_emb(x)
@@ -385,12 +514,14 @@ def preprocess_item(item):
     item.x = x
     item.attn_bias = attn_bias
     item.attn_edge_type = attn_edge_type
+    item.edge_index = edge_index
     item.spatial_pos = spatial_pos
     item.in_degree = adj.long().sum(dim=1).view(-1)
     item.out_degree = item.in_degree # for undirected graph
     item.edge_input = torch.from_numpy(edge_input).long()
 
     return item
+
 
 class MyPygPCQM4MDataset(PygPCQM4Mv2Dataset):
     def download(self):
@@ -417,8 +548,22 @@ class MyPygPCQM4MPosDataset(PygPCQM4Mv2PosDataset):
         item = self.get(self.indices()[idx])
         item.idx = idx
         return preprocess_item(item)
+    
+
+class MyPygPCQM4MDFTDataset(PygPCQM4Mv2DFTDataset):
+    def download(self):
+        super(MyPygPCQM4MDFTDataset, self).download()
+
+    def process(self):
+        super(MyPygPCQM4MDFTDataset, self).process()
+
+    @lru_cache(maxsize=16)
+    def __getitem__(self, idx):
+        item = self.get(self.indices()[idx])
+        item.idx = idx
+        return preprocess_item(item)
 
 
 if __name__ == "__main__":
-    dataset = PygPCQM4Mv2PosDataset()
+    dataset = PygPCQM4Mv2DFTDataset(root='./datasets/pcq-pos')
     print(len(dataset))

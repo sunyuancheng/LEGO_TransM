@@ -8,8 +8,10 @@ ulimit -c unlimited
 [ -z "${update_freq}" ] && update_freq=1
 [ -z "${seed}" ] && seed=1
 [ -z "${clip_norm}" ] && clip_norm=5
-[ -z "${data_path}" ] && data_path='./datasets/'
-[ -z "${save_path}" ] && save_path='./logs/path_to_ckpts/'
+[ -z "${data_path}" ] && data_path='./datasets/pcq-pos'
+# [ -z "${save_path}" ] && save_path='./logs/lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.10-strategylego-lossfncos'
+# [ -z "${save_path}" ] && save_path='./finetune_pretrained/lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noisescale-0.2-mode_prob-0.2,0.2,0.6'
+[ -z "${save_path}" ] && save_path='./finetune_pretrained/lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noisescale-0.2-mode_prob-0.2,0.2,0.6-pretrained-directory-1'
 [ -z "${dropout}" ] && dropout=0.0
 [ -z "${act_dropout}" ] && act_dropout=0.1
 [ -z "${attn_dropout}" ] && attn_dropout=0.1

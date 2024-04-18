@@ -3,6 +3,7 @@ import logging
 import torch
 import torch.nn as nn
 from fairseq import utils
+import numpy as np
 from fairseq.models import (
     FairseqEncoder,
     FairseqEncoderModel,
@@ -16,16 +17,15 @@ from fairseq.utils import safe_hasattr
 
 from ..modules import (
     init_params,
-    TransformerMEncoder,
-    TransformerMEncoderQM9,
+    TransformerMEncoder
 )
+from ..modules.transformer_m_encoder import TransformerMEncoder
 
-from ..utils import load_pretrained_model
 
 logger = logging.getLogger(__name__)
 
-@register_model("Transformer-M")
-class TransformerMModel(FairseqEncoderModel):
+@register_model("LEGO_pretrain")
+class LEGOPretrainModel(FairseqEncoderModel):
     """
     Class for training a Masked Language Model. It also supports an
     additional sentence level prediction if the sent-loss argument is set.
@@ -41,23 +41,11 @@ class TransformerMModel(FairseqEncoderModel):
         if getattr(args, "apply_init", False):
             self.apply(init_params)
         self.encoder_embed_dim = args.encoder_embed_dim
-        if args.pretrained_model_path is not None:
-            self.load_state_dict(load_pretrained_model(self, args.pretrained_model_path))
-
 
     @staticmethod
     def add_args(parser):
         """Add model-specific arguments to the parser."""
         # Arguments related to dropout
-        parser.add_argument(
-            "--remove-head", action='store_true', help="remove pre-trained prediction head"
-        )
-        parser.add_argument(
-            "--load-qm9", action='store_true', default=False, help="load qm9 model"
-        )
-        parser.add_argument(
-            "--load-md17", action='store_true', default=False, help="load qm9 model"
-        )
         parser.add_argument(
             "--mode-prob", type=str, default="0.2,0.2,0.6", help="probability of {2D+3D, 2D, 3D} mode for joint training"
         )
@@ -172,15 +160,6 @@ class TransformerMModel(FairseqEncoderModel):
             action="store_true",
             help="apply layernorm before each encoder block",
         )
-        parser.add_argument(
-            "--pretrained-model-path",
-            type=str,
-            default=None,
-            help="if not none, load and finetune based on the pretrained model",
-        )
-
-    def forward(self, src_tokens, segment_labels=None, **kwargs):
-        return self.encoder(src_tokens, segment_labels=segment_labels, **kwargs)
 
     def max_positions(self):
         return self.encoder.max_positions
@@ -199,23 +178,22 @@ class TransformerMModel(FairseqEncoderModel):
 
         logger.info(args)
 
-        if args.load_qm9 or args.load_md17:
-            encoder = TransformerM3DOnly(args)
-        else:
-            encoder = TransformerM(args)
+        encoder = LEGOModel(args)
 
         return cls(args, encoder)
 
     def forward(self, batched_data, **kwargs):
         return self.encoder(batched_data, **kwargs)
 
-class TransformerM(FairseqEncoder):
+
+
+class LEGOModel(FairseqEncoder):
 
     def __init__(self, args):
         super().__init__(dictionary=None)
         self.max_positions = args.max_positions
 
-        self.molecule_encoder = TransformerMEncoder(
+        self.molecule_encoder = LEGOModelEncoder(
             num_atoms=args.num_atoms,
             num_in_degree=args.num_in_degree,
             num_out_degree=args.num_out_degree,
@@ -246,12 +224,10 @@ class TransformerM(FairseqEncoder):
             mode_prob=args.mode_prob,
         )
 
-        self.embed_out = None
-        # self.lm_output_learned_bias = nn.Parameter(torch.zeros(1))
-        self.proj_out = None
 
-        # remove_head is set to true during fine-tuning
-        self.load_softmax = not getattr(args, "remove_head", False)
+        self.embed_out = None
+        self.lm_output_learned_bias = nn.Parameter(torch.zeros(1))
+        self.proj_out = None
 
         self.lm_head_transform_weight = nn.Linear(
             args.encoder_embed_dim, args.encoder_embed_dim
@@ -259,18 +235,13 @@ class TransformerM(FairseqEncoder):
         self.activation_fn = utils.get_activation_fn(args.activation_fn)
         self.layer_norm = LayerNorm(args.encoder_embed_dim)
 
-        if self.load_softmax:
-            self.lm_output_learned_bias = nn.Parameter(torch.zeros(1))
-            self.embed_out = nn.Linear(
-                args.encoder_embed_dim, 1, bias=False
-            )
-        else:
-            self.proj_out = ClassificationHead(
-                    args.encoder_embed_dim, args.encoder_embed_dim, args.num_classes, args.activation_fn
-                )
-        
+
+        self.embed_out = nn.Linear(
+            args.encoder_embed_dim, 1, bias=False
+        )
+
     def forward(self, batched_data, perturb=None, segment_labels=None, masked_tokens=None, **unused):
-        
+
         inner_states, atom_output = self.molecule_encoder(
             batched_data,
             segment_labels=segment_labels,
@@ -278,13 +249,10 @@ class TransformerM(FairseqEncoder):
         )
 
         x = inner_states[-1].transpose(0, 1)
-        
-        if self.load_softmax:
-            x = self.layer_norm(self.activation_fn(self.lm_head_transform_weight(x)))
-            x = self.embed_out(x)
-            x = x + self.lm_output_learned_bias
-        else:
-            x = self.proj_out(x)
+
+        x = self.layer_norm(self.activation_fn(self.lm_head_transform_weight(x)))
+        x = self.embed_out(x)
+        x = x + self.lm_output_learned_bias
 
         return x, atom_output, {
             "inner_states": inner_states,
@@ -295,194 +263,101 @@ class TransformerM(FairseqEncoder):
         return self.max_positions
 
     def upgrade_state_dict_named(self, state_dict, name):
-        tmp_dict = {}
-        if not self.load_softmax:
-            for k in list(state_dict.keys()):
-                if (
-                    "embed_out.weight" in k
-                    or "sentence_projection_layer.weight" in k
-                    or "lm_output_learned_bias" in k
-                    or "node_proc" in k
-                    or "proj_out.ln" in k
-                ):
-                    print("Removing", k, "(because load_softmax is False)")
-                    tmp_dict[k] = state_dict[k]
-                    del state_dict[k]
-
-            may_missing_keys = [
-                'encoder.proj_out.dense.weight',
-                'encoder.proj_out.dense.bias',
-                'encoder.proj_out.out_proj.weight',
-                'encoder.proj_out.out_proj.bias',
-                'encoder.lm_head_transform_weight.weight',
-                'encoder.lm_head_transform_weight.bias',
-                'encoder.layer_norm.weight',
-                'encoder.layer_norm.bias', ]
-
-            named_parameters = {
-                "encoder." + k: v
-                for k, v in self.named_parameters()
-            }
-
-            for k in may_missing_keys:
-                if k not in state_dict.keys():
-                    state_dict[k] = named_parameters[k].data
-                    print("Copying", k, "(from model initialization)")
         return state_dict
 
 
-class TransformerM3DOnly(FairseqEncoder):
+class LEGOModelEncoder(TransformerMEncoder):
+    """
+    Most parts are same with TransformerMEncoder.
+    Comment Line 292 - 296.
+    In LEGO, all the graphs are in 2D&3D mode.
+    Adjust the 2D and 3D mask: stay None in training.
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-    def __init__(self, args):
-        super().__init__(dictionary=None)
-        self.max_positions = args.max_positions
+    def forward(self, batched_data, perturb=None, segment_labels: torch.Tensor=None,
+                last_state_only: bool=False, position=None, token_embeddings=None,
+                attn_mask=None):
+        
+        data_x = batched_data["x"]
+        n_mol, n_atom = data_x.size()[:2]
+        padding_mask = (data_x[:,:,0]).eq(0) # B x T x 1
+        padding_mask_cls = torch.zeros(n_mol, 1, device=padding_mask.device, dtype=padding_mask.dtype)
+        padding_mask = torch.cat((padding_mask_cls, padding_mask), dim=1)
+        # B x (T+1) x 1
+        mask_dict = {0: [1, 1], 1: [1, 0], 2: [0, 1]}
+        mask_2d = mask_3d = None
+        # if self.training:
+        #     mask_choice = np.random.choice(np.arange(3), n_mol, p=self.mode_prob)
+        #     mask = torch.tensor([mask_dict[i] for i in mask_choice]).to(batched_data['pos'])
+        #     mask_2d = mask[:, 0]
+        #     mask_3d = mask[:, 1]
 
-        self.molecule_encoder = TransformerMEncoderQM9(
-            num_atoms=args.num_atoms,
-            num_in_degree=args.num_in_degree,
-            num_out_degree=args.num_out_degree,
-            num_edges=args.num_edges,
-            num_spatial=args.num_spatial,
-            num_edge_dis=args.num_edge_dis,
-            edge_type=args.edge_type,
-            multi_hop_max_dist=args.multi_hop_max_dist,
-            num_encoder_layers=args.encoder_layers,
-            embedding_dim=args.encoder_embed_dim,
-            ffn_embedding_dim=args.encoder_ffn_embed_dim,
-            num_attention_heads=args.encoder_attention_heads,
-            dropout=args.dropout,
-            attention_dropout=args.attention_dropout,
-            activation_dropout=args.act_dropout,
-            max_seq_len=self.max_positions,
-            num_segments=args.num_segment,
-            use_position_embeddings=not args.no_token_positional_embeddings,
-            encoder_normalize_before=args.encoder_normalize_before,
-            apply_init=args.apply_init,
-            activation_fn=args.activation_fn,
-            learned_pos_embedding=args.encoder_learned_pos,
-            sandwich_ln=args.sandwich_ln,
-            droppath_prob=args.droppath_prob,
-            add_3d=args.add_3d,
-            num_3d_bias_kernel=args.num_3d_bias_kernel,
-            no_2d=args.no_2d,
-            mode_prob=args.mode_prob,
-        )
-
-        self.embed_out = None
-        self.proj_out = None
-
-        self.md17 = args.load_md17
-
-        # remove_head is set to true during fine-tuning
-        self.load_softmax = not getattr(args, "remove_head", False)
-
-        self.lm_head_transform_weight = nn.Linear(
-            args.encoder_embed_dim, args.encoder_embed_dim
-        )
-        self.activation_fn = utils.get_activation_fn(args.activation_fn)
-        self.layer_norm = LayerNorm(args.encoder_embed_dim)
-
-        if self.load_softmax:
-            self.lm_output_learned_bias = nn.Parameter(torch.zeros(1))
-            self.embed_out = nn.Linear(
-                args.encoder_embed_dim, 1, bias=False
-            )
+        if token_embeddings is not None:
+            x = token_embeddings
         else:
-            self.proj_out = ClassificationHead(
-                    args.encoder_embed_dim, args.encoder_embed_dim, args.num_classes, args.activation_fn
-                )
-                    
-        # if self.md17:
-        #     self.force_proj_head = ClassificationHead(args.encoder_embed_dim, args.encoder_embed_dim, 3, args.activation_fn)
+            x = self.atom_feature(batched_data, mask_2d=mask_2d)
 
+        if perturb is not None:
+            x[:, 1:, :] += perturb
 
-    def forward(self, batched_data, perturb=None, segment_labels=None, masked_tokens=None, **unused):
+        # x: B x T x C
 
-        inner_states, atom_output = self.molecule_encoder(
-            batched_data,
-            segment_labels=segment_labels,
-            perturb=perturb,
-        )
+        attn_bias = self.molecule_attn_bias(batched_data, mask_2d=mask_2d)
 
-        x = inner_states[-1].transpose(0, 1)
+        delta_pos = None
+        if self.molecule_3d_bias is not None and not (batched_data["pos"] == 0).all():
+            attn_bias_3d, merged_edge_features, delta_pos = self.molecule_3d_bias(batched_data)
+            if mask_3d is not None:
+                merged_edge_features, delta_pos = merged_edge_features * mask_3d[:, None, None], delta_pos * mask_3d[:, None, None, None]
+                attn_bias_3d = attn_bias_3d.masked_fill_(((attn_bias_3d != float('-inf')) * (1 - mask_3d[:, None, None, None])).bool(), 0.0)
+            attn_bias[:, :, 1:, 1:] = attn_bias[:, :, 1:, 1:] + attn_bias_3d
+            x[:, 1:, :] = x[:, 1:, :] + merged_edge_features * 0.01
 
-        if self.load_softmax:
-            x = self.layer_norm(self.activation_fn(self.lm_head_transform_weight(x)))
-            x = self.embed_out(x)
-            x = x + self.lm_output_learned_bias
+        if self.embed_scale is not None:
+            x = x * self.embed_scale
+
+        if self.quant_noise is not None:
+            x = self.quant_noise(x)
+
+        if self.emb_layer_norm is not None:
+            x = self.emb_layer_norm(x)
+
+        x = self.dropout_module(x)
+
+        # account for padding while computing the representation
+
+        # B x T x C -> T x B x C
+        x = x.transpose(0, 1)
+
+        inner_states = []
+        if not last_state_only:
+            inner_states.append(x)
+
+        for layer in self.layers:
+            x, _ = layer(x, self_attn_padding_mask=padding_mask, self_attn_mask=attn_mask, self_attn_bias=attn_bias)
+            if not last_state_only:
+                inner_states.append(x)
+
+        atom_output = None
+        if delta_pos is not None:
+            atom_output = self.atom_proc(x[1:, :, :], attn_bias[:, :, 1:, 1:], delta_pos)
+            if mask_3d is not None:
+                mask_3d_only = (mask == torch.tensor([0.0, 1.0]).to(mask)[None, :]).all(dim=-1)
+                atom_output = atom_output * mask_3d_only[:, None, None]
+
+        if last_state_only:
+            inner_states = [x]
+
+        if self.traceable:
+            return torch.stack(inner_states), atom_output
         else:
-            proj_out = self.proj_out(x)
-
-        if self.md17:
-            force_pred = self.force_proj_head(x[:, 1:, :])
-            return proj_out, atom_output, force_pred, {
-                "inner_states": inner_states
-            }
-
-        return x, atom_output, {
-            "inner_states": inner_states,
-        }
-
-    def max_positions(self):
-        """Maximum output length supported by the encoder."""
-        return self.max_positions
-
-    def upgrade_state_dict_named(self, state_dict, name):
-        tmp_dict = {}
-        if not self.load_softmax:
-            for k in list(state_dict.keys()):
-                if (
-                    "embed_out.weight" in k
-                    or "sentence_projection_layer.weight" in k
-                    or "lm_output_learned_bias" in k
-                    or "node_proc" in k
-                    or "proj_out.ln" in k
-                ):
-                    print("Removing", k, "(because load_softmax is False)")
-                    tmp_dict[k] = state_dict[k]
-                    del state_dict[k]
-
-            may_missing_keys = [
-                'encoder.proj_out.dense.weight',
-                'encoder.proj_out.dense.bias',
-                'encoder.proj_out.out_proj.weight',
-                'encoder.proj_out.out_proj.bias',
-                'encoder.lm_head_transform_weight.weight',
-                'encoder.lm_head_transform_weight.bias',
-                'encoder.layer_norm.weight',
-                'encoder.layer_norm.bias', ]
-
-            named_parameters = {
-                "encoder." + k: v
-                for k, v in self.named_parameters()
-            }
-
-            for k in may_missing_keys:
-                if k not in state_dict.keys():
-                    state_dict[k] = named_parameters[k].data
-                    print("Copying", k, "(from model initialization)")
-        return state_dict 
-
-class ClassificationHead(nn.Module):
-    """Head for classification tasks."""
-
-    def __init__(self, input_dim, inner_dim, num_classes, activation_fn, pooler_dropout=0.0):
-        super().__init__()
-        self.dense = nn.Linear(input_dim, inner_dim)
-        self.activation_fn = utils.get_activation_fn(activation_fn)
-        self.dropout = nn.Dropout(p=pooler_dropout)
-        self.out_proj = nn.Linear(inner_dim, num_classes)
-
-    def forward(self, features, **kwargs):
-        x = self.dropout(features)
-        x = self.dense(x)
-        x = self.activation_fn(x)
-        x = self.dropout(x)
-        x = self.out_proj(x)
-        return x
+            return inner_states, atom_output
 
 
-@register_model_architecture("Transformer-M", "transformer_m")
+
+@register_model_architecture("LEGO_pretrain", "lego")
 def base_architecture(args):
     args.dropout = getattr(args, "dropout", 0.1)
     args.attention_dropout = getattr(args, "attention_dropout", 0.1)
@@ -514,13 +389,8 @@ def base_architecture(args):
     args.sandwich_ln = getattr(args, "sandwich_ln", False)
     args.droppath_prob = getattr(args, "droppath_prob", 0.0)
 
-    args.add_3d = getattr(args, "add_3d", False)
-    args.num_3d_bias_kernel = getattr(args, "num_3d_bias_kernel", 128)
-    args.no_2d = getattr(args, "no_2d", False)
-    args.mode_prob = getattr(args, "mode_prob", "0.2,0.2,0.6")
 
-
-@register_model_architecture("Transformer-M", "transformer_m_base")
+@register_model_architecture("LEGO_pretrain", "lego_base")
 def bert_base_architecture(args):
     args.encoder_embed_dim = getattr(args, "encoder_embed_dim", 768)
     args.share_encoder_input_output_embed = getattr(
