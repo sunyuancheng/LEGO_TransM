@@ -3,7 +3,7 @@
 
 ## Overview
 
-![model_overview](docs/model_overview.jpg)
+![model overview](docs/model_overview.png)
 
 
 ## Installation
