@@ -54,7 +54,7 @@ export dataset_name="PCQM4M-LSC-V2-3D"
 export add_3d="true"
 export num_3d_bias_kernel=128                       # number of Gaussian Basis kernels
 
-bassh lego_pretrain.sh
+bash lego_pretrain.sh
 ```
 
 We use "uniform_noise/lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.50-strategylego-lossfncos/checkpoint_best.pt" as the pretrained checkpoint.
@@ -77,3 +77,6 @@ bash finetune_qm9_lego_noisynode.sh $task_idx
 task_idx=0   # task idx ranges from 0 to 7
 bash finetune_md17_noisynode.sh $task_idx
 ```
+
+## Acknowledgement
+This codebase is largely based on [Transformer-M](https://github.com/lsj2408/Transformer-M)
