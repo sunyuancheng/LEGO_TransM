@@ -3,7 +3,7 @@
 
 ## Overview
 
-![arch](docs/model_overview.jpg)
+![model_overview](docs/model_overview.jpg)
 
 
 ## Installation
