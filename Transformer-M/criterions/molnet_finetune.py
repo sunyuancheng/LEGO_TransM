@@ -41,6 +41,7 @@ class MolNetFinetuneLoss(FairseqCriterion):
 
         with torch.no_grad():
             natoms = sample["net_input"]["batched_data"]['x'].shape[1]
+
         model_output = model(**sample["net_input"])
         logits, node_output = model_output[0], model_output[1]
         logits = logits[:,0,:]

@@ -62,7 +62,6 @@ class GraphormerPYGDataset(Dataset):
             self.train_idx = None
             self.valid_idx = None
             self.test_idx = None
-
         else:
             self.num_data = len(train_idx) + len(valid_idx) + len(test_idx)
             self.train_idx = train_idx
