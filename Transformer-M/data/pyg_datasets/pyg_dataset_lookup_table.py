@@ -8,6 +8,7 @@ from .pyg_dataset import GraphormerPYGDataset, GraphormerPYGDatasetQM9
 from .molnet import MolNetPosDataset
 from .qm9 import newQM9, newHQM9
 from .md17 import MD17
+from .lba import LBADataset
 import torch.distributed as dist
 
 
@@ -109,6 +110,18 @@ class MyMD17(MD17):
             dist.barrier()
 
 
+class MyLBA(LBADataset):
+    def download(self):
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            super(MyLBA, self).download()
+        if dist.is_initialized():
+            dist.barrier()
+
+def process(self):
+    if not dist.is_initialized() or dist.get_rank() == 0:
+        super(MyLBA, self).process()
+    if dist.is_initialized():
+        dist.barrier()
 
 
 
@@ -179,7 +192,13 @@ class PYGDatasetLookupTable:
                 valid_idx=valid_idx,
                 test_idx=test_idx,
             )
-
+    
+        elif name.startswith("ligand_binding_affinity"):
+            subset = name.split("-")[1] # split_30 / split_60
+            inner_dataset = None
+            train_set = MyLBA(subset=subset, split="train")
+            valid_set = MyLBA(subset=subset, split="valid")
+            test_set = MyLBA(subset=subset, split="test")
         else:
             raise ValueError(f"Unknown dataset name {name} for pyg source.")
         if train_set is not None:

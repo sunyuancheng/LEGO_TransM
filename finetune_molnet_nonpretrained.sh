@@ -73,7 +73,7 @@ new_task="molnet-${task}"
 [ -z "${MASTER_PORT}" ] && MASTER_PORT=10086
 [ -z "${OMPI_COMM_WORLD_SIZE}" ] && OMPI_COMM_WORLD_SIZE=1
 
-[ -z "${save_prefix}" ] && save_prefix='layer6-exp'
+[ -z "${save_prefix}" ] && save_prefix='exp'
 [ -z "${ckpt_path}" ] && ckpt_path='../ckpts/ckpt.pt' # set this dir
 
 echo -e "\n\n"

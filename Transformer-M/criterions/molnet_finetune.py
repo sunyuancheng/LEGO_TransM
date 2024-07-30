@@ -41,7 +41,6 @@ class MolNetFinetuneLoss(FairseqCriterion):
 
         with torch.no_grad():
             natoms = sample["net_input"]["batched_data"]['x'].shape[1]
-
         model_output = model(**sample["net_input"])
         logits, node_output = model_output[0], model_output[1]
         logits = logits[:,0,:]
@@ -64,6 +63,11 @@ class MolNetFinetuneLoss(FairseqCriterion):
             nan_mask = torch.isnan(targets)
             loss_func = nn.BCEWithLogitsLoss
             new_logits, new_labels = new_logits.reshape(-1,1)[~nan_mask], new_labels[~nan_mask]
+        # import numpy as np
+        # import time
+        # import pdb; pdb.set_trace()
+        # np.save(f"bbbp_test_batch{time.time()}", model_output[2]['inner_states'][-1].permute(1,0,2)[:,0,:].detach().cpu().numpy())
+        # np.save(f"bbbp_test_label_batch{time.time()}", targets.detach().cpu().numpy())
 
         loss = loss_func(reduction="mean")(new_logits, new_labels)
         if self.loss_type == 'BCELogits':

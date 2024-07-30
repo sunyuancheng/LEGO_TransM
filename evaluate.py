@@ -29,7 +29,7 @@ def eval(args, use_pretrained, checkpoint_path=None, logger=None):
 
     model_state = torch.load(checkpoint_path)["model"]
     model.load_state_dict(
-        model_state, strict=True, model_cfg=cfg.model
+        model_state, strict=False, model_cfg=cfg.model
     )
     del model_state
 

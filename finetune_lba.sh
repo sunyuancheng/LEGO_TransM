@@ -6,51 +6,33 @@
 ulimit -c unlimited
 
 # export ckpt_path="L12-old.pt"
-export ckpt_path="logs/lr-2e-4-end_lr-1e-9-tsteps-1500000-wsteps-150000-L12-D768-F768-H32-SLN-false-BS2048-SEED1-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.1-noise1.0-mr0.50-strategylego-lossfncos/checkpoint_best.pt"
+export ckpt_path="./logs/finetune_lba/exp-dataset-ligand_binding_affinity-split_60-lr-2e-5-end_lr-1e-9-tsteps-60000-wsteps-6000-L12-D768-F768-H32-SLN-false-BS32-CLIP5-dp0.0-attn_dp0.1-wd0.0-dpp0.0/SEED1-TASK-LOSS-L1-STD-std_logits-RF-/checkpoint_last.pt"
 # example for HOMO (task_idx=2) & LUMO (task_idx=3)
 
+# split_30 or split_60
 task=$1
 export mode_prob="1.0,0.0,0.0"
 
-if [[ $task == "bace" || $task == "bbbp" || $task == "clintox" || $task == "sider" || $task == "tox21" || $task == "toxcast" ]]; then
-  loss="BCELogits"
-else
-  loss="SmoothL1"
-fi
+loss=$2
 
-if [[ $task == "bace" || $task == "bbbp" || $task == "freesolv" || $task == "esol" || $task == "lipo" ]]; then
-  num_classes=1
-elif [ $task == "clintox" ]; then 
-  num_classes=2
-elif [ $task == "sider" ]; then
-  num_classes=27
-elif [ $task == "tox21" ]; then
-  num_classes=12
-elif [ $task == "toxcast" ]; then
-  num_classes=617
-fi
+export num_classes=1
 
-# if [[ $task == "tox21" ]]; then
-#   warmup_steps=6000;
-#   total_steps=60000;
-# fi
-
-new_task="molnet-${task}"
+new_task="ligand_binding_affinity-${task}"
 
 [ -z "${lr}" ] && lr=2e-5
 [ -z "${end_lr}" ] && end_lr=1e-9
-[ -z "${warmup_steps}" ] && warmup_steps=600
-[ -z "${total_steps}" ] && total_steps=6000
+[ -z "${warmup_steps}" ] && warmup_steps=6000
+[ -z "${total_steps}" ] && total_steps=60000
 [ -z "${layers}" ] && layers=12
 [ -z "${hidden_size}" ] && hidden_size=768
 [ -z "${ffn_size}" ] && ffn_size=768
 [ -z "${num_head}" ] && num_head=32
-[ -z "${batch_size}" ] && batch_size=64
+[ -z "${batch_size}" ] && batch_size=32
 [ -z "${update_freq}" ] && update_freq=1
 [ -z "${seed}" ] && seed=1
 [ -z "${clip_norm}" ] && clip_norm=5
 [ -z "${data_path}" ] && data_path='./'
-[ -z "${save_path}" ] && save_path='./logs/finetune_molnet'
+[ -z "${save_path}" ] && save_path='./logs/finetune_lba'
 [ -z "${dropout}" ] && dropout=0.0
 [ -z "${act_dropout}" ] && act_dropout=0.1
 [ -z "${attn_dropout}" ] && attn_dropout=0.1
@@ -209,7 +191,7 @@ CUDA_VISIBLE_DEVICES=0 python train.py \
 	--num-workers 16 --ddp-backend=legacy_ddp \
 	--dataset-name $dataset_name --valid-subset valid,test \
 	--batch-size $batch_size --data-buffer-size 20 --seed $seed \
-	--task molnet_finetune --criterion molnet_finetune --arch transformer_m  --remove-head --num-classes $num_classes \
+	--task lba_finetune --criterion lba_finetune --arch transformer_m  --remove-head --num-classes $num_classes \
 	--lr $lr --end-learning-rate $end_lr --lr-scheduler polynomial_decay --power 1 \
 	--warmup-updates $warmup_steps --total-num-update $total_steps --max-update $total_steps --update-freq $update_freq \
 	--encoder-layers $layers --encoder-attention-heads $num_head $add_3d_args $no_2d_args --num-3d-bias-kernel $num_3d_bias_kernel \

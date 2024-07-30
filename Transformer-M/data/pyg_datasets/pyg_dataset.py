@@ -49,6 +49,12 @@ class GraphormerPYGDataset(Dataset):
             self.valid_data = self.index_select(self.valid_idx)
             self.test_data = self.index_select(self.test_idx)
         elif train_set is not None:
+            try:
+                self.mean = train_set.train_mean
+                self.std = train_set.train_std
+            except:
+                self.mean = 0
+                self.std = 1
             self.num_data = len(train_set) + len(valid_set) + len(test_set)
             self.train_data = self.create_subset(train_set)
             self.valid_data = self.create_subset(valid_set)
@@ -56,6 +62,7 @@ class GraphormerPYGDataset(Dataset):
             self.train_idx = None
             self.valid_idx = None
             self.test_idx = None
+
         else:
             self.num_data = len(train_idx) + len(valid_idx) + len(test_idx)
             self.train_idx = train_idx
