@@ -79,6 +79,11 @@ task_idx=0   # task idx ranges from 0 to 7
 bash finetune_md17_noisynode.sh $task_idx
 ```
 
-## Acknowledgement
+# Acknowledgement
 This codebase is largely based on [Transformer-M](https://github.com/lsj2408/Transformer-M).
 We would like to express our sincere gratitude for their invaluable contributions to this work.
+
+
+This work is supported by the National Science and Technology Major Project (No. 2022ZD0116314).
+
+本项目受新一代人工智能国家科技重大专项（No. 2022ZD0116314）支持。
